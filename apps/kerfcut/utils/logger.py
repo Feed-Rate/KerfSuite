@@ -4,11 +4,10 @@ Handles all application logging, including rotating file handlers.
 """
 import logging
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
+from core.paths import LOGS_DIR
 
 # Setup logs directory
 try:
-    LOGS_DIR = Path.home() / "Documents" / "KerfCut" / "logs"
     LOGS_DIR.mkdir(exist_ok=True, parents=True)
     LOG_FILE = LOGS_DIR / "app.log"
     can_write_logs = True

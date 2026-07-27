@@ -83,7 +83,7 @@ class LayoutGroup:
         return len(self.layouts)
 
     @property
-    def template(self) -> SheetLayout:
+    def template(self) -> SheetLayout | None:
         return self.layouts[0] if self.layouts else None
 
 
@@ -145,7 +145,7 @@ def group_identical_layouts(layouts: list[SheetLayout]) -> list[LayoutGroup]:
             groups.append(group)
         else:
             groups_map[sig].layouts.append(layout)
-            
+
     return groups
 
 

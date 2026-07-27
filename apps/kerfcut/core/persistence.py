@@ -7,10 +7,11 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from .models import Job, Sheet, Piece, PlacedPiece, SheetLayout, ensure_unique_job_ids
+from .paths import JOBS_DIR
 from utils.logger import logger
 
-# Default jobs directory — relative to the user's Documents folder
-DEFAULT_JOBS_DIR = Path.home() / "Documents" / "KerfCut" / "jobs"
+# Standard user-writable jobs folder.
+DEFAULT_JOBS_DIR = JOBS_DIR
 
 
 def _id_or_new(value: str | None) -> str:
@@ -112,7 +113,7 @@ def job_from_dict(data: dict) -> Job:
     version = data.get("version", "1.0")
     if version not in ("1.0",):
         logger.warning(f"Unknown file version: {version}. Data may be corrupted.")
-        
+
     job = Job(
         name=data.get("name", ""),
         customer=data.get("customer", ""),
@@ -139,8 +140,10 @@ def job_from_dict(data: dict) -> Job:
         ))
     for p in data.get("pieces", []):
         can_rot = p.get("can_rotate", True)
-        if p.get("grain_locked", False):
+        # Migrate legacy grain_locked to can_rotate
+        if p.get("grain_locked") is True:
             can_rot = False
+
         job.pieces.append(Piece(
             id=_id_or_new(p.get("id")),
             quantity=p.get("quantity", 0),
@@ -151,8 +154,9 @@ def job_from_dict(data: dict) -> Job:
         ))
     for p in data.get("unplaced", []):
         can_rot = p.get("can_rotate", True)
-        if p.get("grain_locked", False):
+        if p.get("grain_locked") is True:
             can_rot = False
+
         job.unplaced.append(Piece(
             id=_id_or_new(p.get("id")),
             quantity=p.get("quantity", 0),
@@ -178,7 +182,7 @@ def job_from_dict(data: dict) -> Job:
         for p_data in l_data.get("placed", []):
             piece_data = p_data.get("piece", {})
             can_rot = piece_data.get("can_rotate", True)
-            if piece_data.get("grain_locked", False):
+            if piece_data.get("grain_locked") is True:
                 can_rot = False
             piece = Piece(
                 id=_id_or_new(piece_data.get("id")),
@@ -205,71 +209,107 @@ def job_from_dict(data: dict) -> Job:
 
 
 def save_job(job: Job, filepath: str) -> None:
-    Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(job_to_dict(job), f, indent=2, ensure_ascii=False)
+    """Save a Job to disk in .kcut format."""
+    try:
+        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(job_to_dict(job), f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Failed to save job to {filepath}: {e}", exc_info=True)
+        raise
 
 
 def load_job(filepath: str) -> Job:
-    with open(filepath, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return job_from_dict(data)
+    """Load a .kcut or .zcad Job from disk."""
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return job_from_dict(data)
+    except json.JSONDecodeError:
+        logger.error(f"Failed to decode job file (invalid JSON): {filepath}")
+        raise ValueError("Selected file is corrupted or not a valid KerfCut job.")
+    except Exception as e:
+        logger.error(f"Error loading job from {filepath}: {e}", exc_info=True)
+        raise
+
+
+class LegacyZADImporter:
+    """Service to parse legacy Z-CAD .ZAD files."""
+
+    def __init__(self, filepath: str):
+        self.filepath = Path(filepath)
+        self.job = Job(name=self.filepath.stem)
+        self.dispatch_map = {
+            "Material:": self._parse_material,
+            "Mat.\t": self._parse_stock,
+            "Auftrag:": self._parse_customer,
+            "Sonstiges:": self._parse_notes,
+            "Pos.\t": self._parse_piece,
+        }
+
+    def run(self) -> Job:
+        """Parse the file and return a Job object."""
+        try:
+            with open(self.filepath, "rb") as f:
+                content = f.read().decode("latin-1")
+
+            for line in content.replace("\r\n", "\n").split("\n"):
+                self._dispatch_line(line)
+
+            return self.job
+        except Exception as e:
+            logger.error(f"ZAD Import failed for {self.filepath}: {e}")
+            raise
+
+    def _dispatch_line(self, line: str) -> None:
+        for prefix, method in self.dispatch_map.items():
+            if line.startswith(prefix):
+                method(line.split("\t"))
+                return
+
+    def _parse_material(self, parts: list[str]) -> None:
+        if len(parts) > 1:
+            self.job.material_name = parts[1].strip()
+
+    def _parse_stock(self, parts: list[str]) -> None:
+        if len(parts) >= 7 and parts[2].strip() == "1":
+            try:
+                w = int(parts[4]) if parts[4].strip() not in ("", "0") else 0
+                h = int(parts[5]) if parts[5].strip() not in ("", "0") else 0
+                if w > 0 and h > 0:
+                    sheet = Sheet(width=w, height=h, active=True)
+                    if len(parts) >= 12:
+                        sheet.buy_price = float(parts[7])
+                        sheet.sell_price = float(parts[8])
+                        sheet.thickness = float(parts[9])
+                        if self.job.blade_kerf == 4:
+                            self.job.blade_kerf = int(parts[10])
+                    self.job.sheets.append(sheet)
+            except (ValueError, IndexError):
+                pass
+
+    def _parse_customer(self, parts: list[str]) -> None:
+        if len(parts) > 1:
+            self.job.customer = parts[1].strip()
+
+    def _parse_notes(self, parts: list[str]) -> None:
+        if len(parts) > 1:
+            self.job.notes = parts[1].strip()
+
+    def _parse_piece(self, parts: list[str]) -> None:
+        if len(parts) >= 5:
+            try:
+                qty, w, h = int(parts[2]), int(parts[3]), int(parts[4].strip())
+                if qty > 0 and w > 0 and h > 0:
+                    self.job.pieces.append(Piece(quantity=qty, width=w, height=h))
+            except ValueError:
+                pass
 
 
 def load_zad_file(filepath: str) -> Job:
     """Import a legacy Z-CAD .ZAD file into a KerfCut Job."""
-    with open(filepath, "rb") as f:
-        content = f.read().decode("latin-1")
-
-    lines = content.replace("\r\n", "\n").split("\n")
-    job = Job()
-    job.name = Path(filepath).stem
-
-    for line in lines:
-        parts = line.split("\t")
-
-        if line.startswith("Material:"):
-            job.material_name = parts[1].strip() if len(parts) > 1 else ""
-
-        elif line.startswith("Mat.\t"):
-            if len(parts) >= 7:
-                active = parts[2].strip() == "1"
-                try:
-                    w = int(parts[4]) if parts[4].strip() not in ("", "0") else 0
-                    h = int(parts[5]) if parts[5].strip() not in ("", "0") else 0
-                except ValueError:
-                    w, h = 0, 0
-                if active and w > 0 and h > 0:
-                    sheet = Sheet(width=w, height=h, active=True)
-                    if len(parts) >= 12:
-                        try:
-                            sheet.buy_price  = float(parts[7])
-                            sheet.sell_price = float(parts[8])
-                            sheet.thickness  = float(parts[9])
-                            if job.blade_kerf == 4:
-                                job.blade_kerf = int(parts[10])
-                        except (ValueError, IndexError):
-                            pass
-                    job.sheets.append(sheet)
-
-        elif line.startswith("Auftrag:"):
-            job.customer = parts[1].strip() if len(parts) > 1 else ""
-
-        elif line.startswith("Sonstiges:"):
-            job.notes = parts[1].strip() if len(parts) > 1 else ""
-
-        elif line.startswith("Pos.\t"):
-            if len(parts) >= 5:
-                try:
-                    qty = int(parts[2])
-                    w   = int(parts[3])
-                    h   = int(parts[4].strip())
-                    if qty > 0 and w > 0 and h > 0:
-                        job.pieces.append(Piece(quantity=qty, width=w, height=h))
-                except ValueError:
-                    pass
-
-    return job
+    importer = LegacyZADImporter(filepath)
+    return importer.run()
 
 
 def get_recent_jobs(jobs_dir: str | None = None, max_count: int = 10) -> list[dict]:

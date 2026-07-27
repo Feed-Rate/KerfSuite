@@ -1,16 +1,11 @@
 """
 KerfCut — MaxRects Bin-Packing Algorithm
-
-Implements the MAXRECTS algorithm (Jukka Jylänki, 2010).
-This is significantly better than simple guillotine cuts.
-
-Heuristic used: Best Short Side Fit (BSSF) — places each piece
-into the free rectangle that minimises the shorter leftover side.
 """
+from __future__ import annotations
 import copy
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from .models import Sheet, Piece, PlacedPiece, Job
+from .models import Sheet, Piece, PlacedPiece, Job, SheetLayout, ensure_unique_job_ids
 
 
 @dataclass
@@ -34,7 +29,7 @@ class Rect:
 
 class PackingStrategy(ABC):
     """Abstract base class for all cut optimization strategies."""
-    
+
     @abstractmethod
     def pack_sheet(self, sheet: Sheet, pieces_flat: list[tuple["Piece", int]], kerf: int) -> tuple[list[PlacedPiece], list[tuple["Piece", int]]]:
         """
@@ -49,7 +44,7 @@ class MaxRectsBSSFStrategy(PackingStrategy):
     MaxRects algorithm using Best Short Side Fit (BSSF) heuristic.
     Places each piece into the free rectangle that minimises the shorter leftover side.
     """
-    
+
     def _split_rect(self, free: Rect, placed: Rect) -> list[Rect]:
         """Split a free rectangle around a placed rectangle — guillotine split."""
         result = []
@@ -137,7 +132,7 @@ class MaxRectsBSSFStrategy(PackingStrategy):
                     # Every piece reserves piece_dim + kerf in the virtual sheet
                     pw = piece.width + kerf
                     ph = piece.height + kerf
-                    
+
                     if pw <= free.w and ph <= free.h:
                         score = self._score_bssf(free, pw, ph)
                         if score < best_score:
@@ -212,10 +207,10 @@ class GuillotineStrategy(PackingStrategy):
         """Split a free rectangle around a placed rectangle located at bottom-left (free.x, free.y) into exactly two non-overlapping rectangles."""
         w = free.w - pw
         h = free.h - ph
-        
+
         area_horiz = max(w * ph, free.w * h)
         area_vert = max(pw * h, w * free.h)
-        
+
         result = []
         if area_horiz > area_vert:
             # Horizontal split produces a larger single remaining chunk
@@ -229,7 +224,7 @@ class GuillotineStrategy(PackingStrategy):
                 result.append(Rect(free.x, free.y + ph, pw, h))
             if w > 0 and free.h > 0:
                 result.append(Rect(free.x + pw, free.y, w, free.h))
-                
+
         return result
 
     def pack_sheet(self, sheet: Sheet, pieces_flat: list[tuple["Piece", int]], kerf: int) -> tuple[list[PlacedPiece], list[tuple["Piece", int]]]:
@@ -330,133 +325,147 @@ PIECE_COLORS = [
 ]
 
 
+def _estimate_labor(layouts: list) -> tuple[float, float]:
+    """Calculate estimated labor minutes and cost."""
+    sheets_count = len(layouts)
+    pieces_count = sum(len(l.placed) for l in layouts)
+    minutes = (sheets_count * 5.0) + (pieces_count * 1.0)
+    return minutes, 0.0  # cost calculated by caller using hourly rate
+
+
+class BinPacker:
+    """Service to orchestrate the bin-packing optimization process."""
+
+    def __init__(self, job: "Job", strategy: PackingStrategy):
+        self.job = job
+        self.strategy = strategy
+        self.sheet_pool: dict[int, tuple[Sheet, int]] = {}
+        self.pieces_flat: list[tuple[Piece, int]] = []
+        self.color_map: dict[str, tuple] = {}
+        self.remaining: list[tuple[Piece, int]] = []
+        self.used_sheet_ids: set[int] = set()
+
+    def run(self) -> None:
+        """Execute the optimization and populate job results."""
+        self._initialize_pools()
+        self._pack_all_sheets()
+        self._finalize_results()
+
+    def _initialize_pools(self) -> None:
+        """Prepare sheet and piece pools for optimization."""
+        self.job.layouts = []
+        self.job.unplaced = []
+
+        # Initialize sheet pool
+        for i, sheet in enumerate(self.job.sheets):
+            if sheet.active and sheet.width > 0 and sheet.height > 0:
+                qty = max(sheet.quantity, 0)
+                if qty > 0:
+                    self.sheet_pool[i] = (sheet, qty)
+
+        # Expand pieces and assign colors
+        for idx, piece in enumerate(self.job.pieces):
+            if piece.quantity > 0 and piece.width > 0 and piece.height > 0:
+                self.color_map[piece.id] = PIECE_COLORS[idx % len(PIECE_COLORS)]
+                for _ in range(piece.quantity):
+                    self.pieces_flat.append((piece, idx))
+
+        self.remaining = list(self.pieces_flat)
+
+    def _pack_all_sheets(self) -> None:
+        """Iteratively pack pieces onto sheets until no more fit or no more sheets."""
+        while self.remaining and self.sheet_pool:
+            best_fit = self._find_best_fit_layout()
+            if not best_fit:
+                break
+
+            layout, sid, leftover = best_fit
+            self._record_layout(layout, leftover, sid)
+
+    def _find_best_fit_layout(self) -> tuple[SheetLayout, int, list] | None:
+        """Find the best sheet/layout for current remaining pieces."""
+        best_data = None
+        best_efficiency = -1.0
+        best_waste = float('inf')
+
+        # Two-phase selection: Phase 1 (prefer used), Phase 2 (any)
+        for prefer_used in (True, False):
+            for sid, (sheet, qty) in self.sheet_pool.items():
+                if prefer_used and sid not in self.used_sheet_ids:
+                    continue
+
+                placed, leftover = self.strategy.pack_sheet(sheet, list(self.remaining), self.job.blade_kerf)
+                if not placed:
+                    continue
+
+                eff, waste = self._score_layout(sheet, placed)
+
+                if self._is_better_layout(eff, waste, best_efficiency, best_waste):
+                    best_efficiency, best_waste = eff, waste
+                    best_data = (SheetLayout(sheet=sheet, placed=placed), sid, leftover)
+
+            if best_data:
+                break
+
+        return best_data
+
+    def _score_layout(self, sheet: Sheet, placed: list[PlacedPiece]) -> tuple[float, int]:
+        """Calculate efficiency and waste for a proposed layout."""
+        used_area = sum(p.width * p.height for p in placed)
+        eff = used_area / sheet.area if sheet.area > 0 else 0
+        waste = sheet.area - used_area
+        return eff, waste
+
+    def _is_better_layout(self, eff, waste, best_eff, best_waste) -> bool:
+        """Tie-breaking logic for layout selection."""
+        return (eff > best_eff + 1e-9 or (abs(eff - best_eff) <= 1e-9 and waste < best_waste))
+
+    def _record_layout(self, layout: SheetLayout, leftover: list, sid: int) -> None:
+        """Update state after a layout is selected."""
+        for pp in layout.placed:
+            pp.color = self.color_map.get(pp.piece.id, (180, 180, 180))
+
+        layout.waste_area = layout.sheet.area - layout.used_area
+        self.job.layouts.append(layout)
+        self.remaining = leftover
+        self.used_sheet_ids.add(sid)
+
+        # Consume sheet
+        sheet_obj, qty = self.sheet_pool[sid]
+        if qty <= 1:
+            del self.sheet_pool[sid]
+        else:
+            self.sheet_pool[sid] = (sheet_obj, qty - 1)
+
+    def _finalize_results(self) -> None:
+        """Consolidate unplaced pieces and update job statistics."""
+        unplaced_dict = {}
+        for p, _ in self.remaining:
+            if p.id not in unplaced_dict:
+                p_copy = copy.copy(p)
+                p_copy.quantity = 0
+                unplaced_dict[p.id] = p_copy
+            unplaced_dict[p.id].quantity += 1
+
+        self.job.unplaced = list(unplaced_dict.values())
+
+        # Labor estimation
+        mins, _ = _estimate_labor(self.job.layouts)
+        self.job.estimated_labor_minutes = mins
+        if self.job.hourly_rate > 0:
+            self.job.estimated_labor_cost = (mins / 60.0) * self.job.hourly_rate
+        else:
+            self.job.estimated_labor_cost = 0.0
+
+
 def optimize(job: "Job", strategy: PackingStrategy | None = None) -> "Job":
-    """
-    Run the optimization on a job using the provided strategy.
-    Populates job.layouts and job.unplaced.
-    Returns the modified job.
-    """
-    from .models import SheetLayout, ensure_unique_job_ids
-    
+    """Main entry point for optimization logic."""
     if strategy is None:
         strategy = MaxRectsBSSFStrategy()
 
     ensure_unique_job_ids(job)
-    job.layouts = []
-    job.unplaced = []
 
-    # Initialize sheet pool with active sheets
-    sheet_pool: dict[int, tuple[Sheet, int]] = {}
-    for i, sheet in enumerate(job.sheets):
-        if sheet.active and sheet.width > 0 and sheet.height > 0:
-            qty = max(sheet.quantity, 0)
-            if qty > 0:
-                sheet_pool[i] = (sheet, qty)
-
-    # Expand pieces by quantity
-    pieces_flat: list[tuple[Piece, int]] = []
-    color_map: dict[str, tuple] = {}
-    for idx, piece in enumerate(job.pieces):
-        if piece.quantity > 0 and piece.width > 0 and piece.height > 0:
-            color = PIECE_COLORS[idx % len(PIECE_COLORS)]
-            color_map[piece.id] = color
-            for _ in range(piece.quantity):
-                pieces_flat.append((piece, idx))
-
-    remaining = pieces_flat
-    used_sheet_ids: set[int] = set()  # track which sheet index have been opened this run
-
-    # Two-phase best-fit sheet selection:
-    #   Phase 1 (prefer_used=True):  only consider sheet types already opened this run.
-    #                                This lets leftover pieces "overflow" onto the same
-    #                                stock that's already in use rather than starting a
-    #                                brand-new, different sheet size for just a few pieces.
-    #   Phase 2 (prefer_used=False): if no already-open type can fit any remaining piece,
-    #                                open the best available sheet type from the full pool.
-    while remaining and sheet_pool:
-        best_layout = None
-        best_sheet_id = None
-        best_remaining = remaining
-        best_placed_count = 0
-        best_efficiency = -1.0
-        best_waste = float('inf')
-
-        for prefer_used in (True, False):
-            for sid, (sheet, qty) in sheet_pool.items():
-                if qty <= 0:
-                    continue
-                # In phase 1, skip sheet types not yet opened this run
-                if prefer_used and sid not in used_sheet_ids:
-                    continue
-
-                placed, leftover = strategy.pack_sheet(sheet, list(remaining), job.blade_kerf)
-                if not placed:
-                    continue
-
-                used_area = sum(p.width * p.height for p in placed)
-                eff = used_area / sheet.area if sheet.area > 0 else 0
-                waste = sheet.area - used_area
-                placed_count = len(placed)
-
-                # Primary score: efficiency % — prefer the sheet where placed pieces fill
-                # the highest proportion of the sheet area.
-                # Tiebreaker: absolute waste (mm²) — when efficiency is identical, prefer
-                # the smaller sheet to waste less raw material.
-                is_better = (
-                    eff > best_efficiency + 1e-9 or
-                    (abs(eff - best_efficiency) <= 1e-9 and waste < best_waste)
-                )
-                if is_better:
-                    best_layout = SheetLayout(sheet=sheet, placed=placed)
-                    best_sheet_id = sid
-                    best_remaining = leftover
-                    best_placed_count = placed_count
-                    best_efficiency = eff
-                    best_waste = waste
-
-            if best_layout is not None:
-                break  # Satisfied in this phase; don't fall through to next phase
-
-        if best_layout is None:
-            break  # No sheet type could fit any remaining piece
-
-        # Assign colors and record the layout
-        for pp in best_layout.placed:
-            pp.color = color_map.get(pp.piece.id, (180, 180, 180))
-
-        best_layout.waste_area = best_layout.sheet.area - best_layout.used_area
-        job.layouts.append(best_layout)
-
-        remaining = best_remaining
-        used_sheet_ids.add(best_sheet_id)
-
-        # Consume one sheet from the pool
-        sheet_obj, qty = sheet_pool[best_sheet_id]
-        qty -= 1
-        if qty <= 0:
-            del sheet_pool[best_sheet_id]
-        else:
-            sheet_pool[best_sheet_id] = (sheet_obj, qty)
-
-
-    unplaced_dict = {}
-
-    for p, _ in remaining:
-        if p.id not in unplaced_dict:
-            p_copy = copy.copy(p)
-            p_copy.quantity = 0
-            unplaced_dict[p.id] = p_copy
-        unplaced_dict[p.id].quantity += 1
-    job.unplaced = list(unplaced_dict.values())
-
-    # Simple labor estimation: 5 min per sheet + 1 min per placed piece
-    sheets_count = len(job.layouts)
-    pieces_count = sum(len(l.placed) for l in job.layouts)
-    job.estimated_labor_minutes = (sheets_count * 5.0) + (pieces_count * 1.0)
-    
-    if job.hourly_rate > 0:
-        job.estimated_labor_cost = (job.estimated_labor_minutes / 60.0) * job.hourly_rate
-    else:
-        job.estimated_labor_cost = 0.0
+    packer = BinPacker(job, strategy)
+    packer.run()
 
     return job

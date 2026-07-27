@@ -108,6 +108,17 @@ def test_piece_fields_preserved():
     assert p1.can_rotate is False
 
 
+def test_grain_locked_migration():
+    from core.persistence import job_from_dict
+    data = {
+        "pieces": [
+            {"id": "p1", "quantity": 1, "width": 100, "height": 100, "grain_locked": True}
+        ]
+    }
+    job = job_from_dict(data)
+    assert job.pieces[0].can_rotate is False
+
+
 def test_file_is_valid_json():
     job = sample_job()
     with tempfile.NamedTemporaryFile(suffix=".kcut", delete=False) as f:

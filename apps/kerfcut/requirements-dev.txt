@@ -1,2 +1,10 @@
 pytest>=7.0.0
 pytest-qt>=4.2.0
+pytest-bdd>=6.1.1
+pytest-cov>=4.1.0
+mutmut>=2.4.4
+flake8>=6.1.0
+black>=23.7.0
+mypy>=1.5.1
+radon>=6.0.1
+pyinstaller>=6.0.0

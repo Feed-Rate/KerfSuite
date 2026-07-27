@@ -27,7 +27,7 @@ load_dotenv()
 API_BASE_URL = os.getenv("API_BASE_URL", "https://synontech.vercel.app/kerfsuite/api/v1")
 
 # Trial limits
-TRIAL_MAX_DAYS = 30  # Display only; enforcement is server-side
+TRIAL_MAX_DAYS = 90  # Display only; enforcement is server-side
 TRIAL_MAX_RUNS = 20
 
 
@@ -66,90 +66,85 @@ def _get_fernet() -> Fernet:
     key = base64.urlsafe_b64encode(digest)
     return Fernet(key)
 
-def _get_machine_id() -> str:
-    """Generate a unique, stable composite hardware fingerprint.
+class HardwareProbe:
+    """Service to probe individual hardware identifiers."""
 
-    Combines multiple hardware identifiers to make spoofing significantly
-    harder than a MAC-only approach.  Each component is read via subprocess
-    with a short timeout; if any source fails the fingerprint degrades
-    gracefully (the remaining components still produce a deterministic hash).
+    @staticmethod
+    def get_mac() -> str:
+        return str(uuid.getnode())
 
-    Sources:
-      1. MAC address         — trivial to spoof alone, but stable across OS reinstalls.
-      2. Windows Machine SID — hard to change without breaking the OS install.
-      3. Boot disk serial    — manufacturer-assigned, very hard to fake.
-    """
-    import subprocess
+    @staticmethod
+    def get_windows_sid() -> str | None:
+        import subprocess
+        safe_username = os.environ.get('USERNAME', '').replace("'", "''")
 
-    components: list[str] = []
-
-    # 1. MAC address (always available via uuid)
-    components.append(str(uuid.getnode()))
-
-    # Safely escape username for WMI/PowerShell queries
-    safe_username = os.environ.get('USERNAME', '').replace("'", "''")
-
-    # 2. Windows Machine SID (the domain prefix, not the per-user RID)
-    try:
-        result = subprocess.run(
-            ["wmic", "useraccount", "where",
-             f"name='{safe_username}'", "get", "sid"],
-            capture_output=True, text=True, timeout=5,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        for line in result.stdout.strip().splitlines():
-            line = line.strip()
-            if line.startswith("S-"):
-                # Strip the per-user RID to get the machine-level SID
-                machine_sid = "-".join(line.split("-")[:-1])
-                components.append(machine_sid)
-                break
-    except Exception:
-        # Fallback: try PowerShell Get-CimInstance (wmic is deprecated on Win11)
+        # Try WMIC first
         try:
-            result = subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 "(Get-CimInstance Win32_UserAccount -Filter "
-                 f"\"Name='{safe_username}'\").SID"],
-                capture_output=True, text=True, timeout=8,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            for line in result.stdout.strip().splitlines():
-                line = line.strip()
-                if line.startswith("S-"):
-                    machine_sid = "-".join(line.split("-")[:-1])
-                    components.append(machine_sid)
-                    break
-        except Exception:
-            pass  # Both failed — omit this component
-
-    # 3. Boot disk serial number
-    try:
-        result = subprocess.run(
-            ["wmic", "diskdrive", "where", "Index=0", "get", "SerialNumber"],
-            capture_output=True, text=True, timeout=5,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        lines = [l.strip() for l in result.stdout.strip().splitlines()
-                 if l.strip() and l.strip().lower() != "serialnumber"]
-        if lines:
-            components.append(lines[0])
-    except Exception:
-        try:
-            result = subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 "(Get-CimInstance Win32_DiskDrive -Filter 'Index=0').SerialNumber"],
-                capture_output=True, text=True, timeout=8,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            serial = result.stdout.strip()
-            if serial:
-                components.append(serial)
+            res = subprocess.run(["wmic", "useraccount", "where", f"name='{safe_username}'", "get", "sid"],
+                                 capture_output=True, text=True, timeout=5,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            for line in res.stdout.strip().splitlines():
+                if line.strip().startswith("S-"):
+                    return "-".join(line.strip().split("-")[:-1])
         except Exception:
             pass
 
-    combined = "|".join(components)
-    return hashlib.sha256(combined.encode()).hexdigest()[:16].upper()
+        # Try PowerShell fallback
+        try:
+            res = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                  f"(Get-CimInstance Win32_UserAccount -Filter \"Name='{safe_username}'\").SID"],
+                                 capture_output=True, text=True, timeout=8,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            for line in res.stdout.strip().splitlines():
+                if line.strip().startswith("S-"):
+                    return "-".join(line.strip().split("-")[:-1])
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def get_disk_serial() -> str | None:
+        import subprocess
+        try:
+            res = subprocess.run(["wmic", "diskdrive", "where", "Index=0", "get", "SerialNumber"],
+                                 capture_output=True, text=True, timeout=5,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            lines = [l.strip() for l in res.stdout.strip().splitlines() if l.strip() and l.strip().lower() != "serialnumber"]
+            if lines: return lines[0]
+        except Exception:
+            pass
+
+        try:
+            res = subprocess.run(["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_DiskDrive -Filter 'Index=0').SerialNumber"],
+                                 capture_output=True, text=True, timeout=8,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            serial = res.stdout.strip()
+            if serial: return serial
+        except Exception:
+            pass
+        return None
+
+
+class IdentityAggregator:
+    """Orchestrates hardware probes to generate a stable identity."""
+
+    @staticmethod
+    def generate_id() -> str:
+        components = [HardwareProbe.get_mac()]
+
+        sid = HardwareProbe.get_windows_sid()
+        if sid: components.append(sid)
+
+        serial = HardwareProbe.get_disk_serial()
+        if serial: components.append(serial)
+
+        combined = "|".join(components)
+        return hashlib.sha256(combined.encode()).hexdigest()[:16].upper()
+
+
+def _get_machine_id() -> str:
+    """Generate a unique, stable composite hardware fingerprint."""
+    return IdentityAggregator.generate_id()
 
 
 def get_machine_id_display() -> str:
@@ -158,17 +153,16 @@ def get_machine_id_display() -> str:
     return "-".join([mid[i:i + 4] for i in range(0, 16, 4)])
 
 def save_offline_token(license_key: str):
-    """Saves an encrypted token valid for 30 days."""
+    """Saves an encrypted token valid for the beta grace period."""
     try:
-        # 30 day grace period
-        expiry = time.time() + (30 * 24 * 60 * 60)
+        expiry = time.time() + (TRIAL_MAX_DAYS * 24 * 60 * 60)
         data = {
             "key": license_key,
             "expires_at": expiry,
             "machine_id": _get_machine_id()
         }
         encrypted = _get_fernet().encrypt(json.dumps(data).encode("utf-8"))
-        
+
         settings = QSettings(APP_AUTHOR, APP_NAME)
         settings.setValue("auth/grace_token", encrypted.decode("utf-8"))
         # Record this to detect clock rollbacks
@@ -182,11 +176,11 @@ def check_offline_token() -> bool:
     if force_trial_mode_enabled():
         return False
     settings = QSettings(APP_AUTHOR, APP_NAME)
-    
+
     # 1. Clock Tampering Check
     last_verified = float(settings.value("auth/last_verified", 0))
     current_time = time.time()
-    
+
     if current_time < last_verified - 3600: # Allow 1 hour drift
         logger.warning("System clock appears to have been rolled back. Invalidating offline token.")
         return False
@@ -194,22 +188,22 @@ def check_offline_token() -> bool:
     token = settings.value("auth/grace_token", "")
     if not token:
         return False
-        
+
     try:
         decrypted = _get_fernet().decrypt(token.encode("utf-8")).decode("utf-8")
         data = json.loads(decrypted)
-        
+
         # 2. Expiry Check
         if time.time() > data.get("expires_at", 0):
             logger.warning("Offline grace token has expired.")
             return False
-            
+
         # 3. Hardware Lock Check
         if data.get("machine_id") != _get_machine_id():
             logger.error("Offline token belongs to a different machine.")
             return False
 
-        logger.info("Valid 30-day offline token found.")
+        logger.info(f"Valid {TRIAL_MAX_DAYS}-day offline token found.")
         return True
     except Exception as e:
         logger.error(f"Offline token validation failed: {e}")
@@ -236,23 +230,23 @@ def get_license_info() -> dict:
                 "tier": "trial"
             }
         return {"status": "Expired (Read-Only)", "days_left": 0, "tier": "expired"}
-        
+
     settings = QSettings(APP_AUTHOR, APP_NAME)
     token = settings.value("auth/grace_token", "")
-    
+
     # Check for active Pro license first
     if token:
         try:
             decrypted = _get_fernet().decrypt(token.encode("utf-8")).decode("utf-8")
             data = json.loads(decrypted)
-            
+
             expires_at = data.get("expires_at", 0)
             remaining_seconds = expires_at - time.time()
             days_left = max(0, int(remaining_seconds / (24 * 60 * 60)))
-            
+
             if data.get("machine_id") != _get_machine_id():
                 return {"status": "Hardware Mismatch", "days_left": 0, "tier": "expired"}
-            
+
             if remaining_seconds > 0:
                 return {
                     "status": "Activated",
@@ -262,7 +256,7 @@ def get_license_info() -> dict:
                 }
         except Exception as e:
             logger.warning(f"Failed to parse offline token: {e}")
-    
+
     # No valid Pro license — check trial status
     trial = get_trial_status()
     if trial["tier"] == "trial":
@@ -275,7 +269,7 @@ def get_license_info() -> dict:
             "runs_total": TRIAL_MAX_RUNS,
             "tier": "trial"
         }
-    
+
     return {"status": "Expired (Read-Only)", "days_left": 0, "tier": "expired"}
 
 
@@ -287,23 +281,23 @@ def get_trial_status() -> dict:
     if not API_BASE_URL:
         logger.warning("No API credentials — defaulting to expired tier.")
         return {"tier": "expired", "runs_left": 0, "days_left": 0}
-    
+
     current_mid = _get_machine_id()
     url = f"{API_BASE_URL}/trials/status"
-    
+
     try:
         with httpx.Client(timeout=10.0) as client:
             response = client.get(url, params={"machine_id": current_mid})
-            
+
             if response.status_code != 200:
                 logger.error(f"Trial check failed: {response.status_code}")
                 return {"tier": "expired", "runs_left": 0, "days_left": 0}
-            
+
             data = response.json()
             tier = data.get("tier", "expired")
             if tier == "free":
                 tier = "expired"
-            
+
             trial_status = {
                 "tier": tier,
                 "runs_left": data.get("runs_left", 0),
@@ -311,7 +305,7 @@ def get_trial_status() -> dict:
             }
             _cache_trial_status(**trial_status)
             return trial_status
-                
+
     except httpx.RequestError as e:
         logger.error(f"Network error checking trial: {e}")
         # Offline fallback — check local cache
@@ -327,23 +321,25 @@ def get_trial_status() -> dict:
         return {"tier": "expired", "runs_left": 0, "days_left": 0}
 
 
-def increment_trial_run() -> bool:
+def increment_trial_run() -> dict:
     """
     Increment the trial run counter via KerfPortal API.
     Also caches the result locally for offline fallback.
+    Returns the updated trial status dict.
     """
+    default_expired = {"tier": "expired", "runs_left": 0, "days_left": 0}
     if not API_BASE_URL:
-        return False
-    
+        return default_expired
+
     current_mid = _get_machine_id()
     url = f"{API_BASE_URL}/trials/run"
-    
+
     try:
         with httpx.Client(timeout=10.0) as client:
             resp = client.post(url, json={"machine_id": current_mid})
             if resp.status_code != 200:
                 logger.error(f"Atomic trial increment failed: {resp.status_code} - {resp.text}")
-                return False
+                return get_trial_status() # Fallback to a refresh
 
             data = resp.json()
             tier = data.get("tier", "expired")
@@ -351,13 +347,14 @@ def increment_trial_run() -> bool:
                 tier = "expired"
             runs_left = data.get("runs_left", 0)
             days_left = data.get("days_left", 0)
-            
-            _cache_trial_status(tier=tier, runs_left=runs_left, days_left=days_left)
+
+            trial_status = {"tier": tier, "runs_left": runs_left, "days_left": days_left}
+            _cache_trial_status(**trial_status)
             logger.info(f"Trial run incremented. {runs_left} runs left.")
-            return True
+            return trial_status
     except Exception as e:
         logger.error(f"Failed to increment trial run: {e}")
-        return False
+        return get_trial_status() # Fallback to a refresh
 
 
 def verify_license(license_key: str) -> bool:
@@ -377,18 +374,18 @@ def verify_license(license_key: str) -> bool:
     if not API_BASE_URL:
         logger.error("Licensing Error: Missing API_BASE_URL")
         return False
-        
+
     current_mid = _get_machine_id()
     url = f"{API_BASE_URL}/licenses/verify"
-    
+
     try:
         with httpx.Client(timeout=10.0) as client:
             response = client.post(url, json={"cdkey": license_key, "machine_id": current_mid})
-            
+
             if response.status_code == 404:
                 logger.warning("License key not found.")
                 return False
-                
+
             if response.status_code == 403:
                 data = response.json()
                 if data.get("status") == "revoked":
@@ -399,15 +396,15 @@ def verify_license(license_key: str) -> bool:
                 else:
                     logger.warning("Access Denied: License is bound to a different machine.")
                 return False
-                
+
             if response.status_code in (200, 201):
                 logger.info("License verified via portal.")
                 save_offline_token(license_key)
                 return True
-                
+
             logger.error(f"Portal check failed: {response.status_code} - {response.text}")
             return False
-            
+
     except httpx.RequestError as e:
         logger.error(f"Network error during license check: {e}")
         return False

@@ -1,94 +1,83 @@
 # KerfCut
 
-**Rectangular Cut Optimiser** — a modern Python desktop application for planning sheet material cuts in workshops.
+**KerfCut v1.0.1 beta** is a rectangular sheet cut optimiser for workshops.
 
-Built with **PyQt6** and the **MaxRects BSSF** bin-packing algorithm.
+This is a beta release. It is stable enough for real workshop testing, but users should keep their original job data and verify cut plans before production use.
 
----
+## Beta Access
 
-## Project Structure
+KerfCut v1.0.1 beta is free to test for 90 days with a beta license key.
 
-```
-KerfCut/
-│
-├── main.py              # Entry point (3 lines — just calls ui/app.py)
-├── version.py           # Single source of truth for name, version, branding
-├── requirements.txt
-├── README.md
-│
-├── core/                # Business logic — no UI dependencies
-│   ├── models.py        # Job, Sheet, Piece, PlacedPiece, SheetLayout
-│   ├── optimizer.py     # MaxRects bin-packing algorithm
-│   ├── persistence.py   # Save / load .zcad (JSON), import .ZAD
-│   └── export_pdf.py    # PDF report generation (requires reportlab)
-│
-├── ui/                  # PyQt6 interface
-│   ├── app.py           # QApplication setup, stylesheet loading
-│   ├── main_window.py   # Main window, menus, toolbar, file I/O
-│   ├── job_tab.py       # Job Info tab
-│   ├── sheets_tab.py    # Stock Sheets tab
-│   ├── pieces_tab.py    # Pieces tab
-│   ├── cutplan_tab.py   # Cut Plan visualisation tab
-│   └── costs_tab.py     # Cost & Quote tab
-│
-├── assets/
-│   └── style.qss        # Qt stylesheet (edit without touching Python)
-│
-├── jobs/                # Default saved jobs directory (.zcad files)
-│   └── .gitkeep
-│
-└── tests/
-    ├── test_optimizer.py    # Optimizer unit tests
-    └── test_persistence.py  # Save/load/import unit tests
+Beta keys are issued through the KerfSuite portal. To activate:
+
+1. Install and launch KerfCut.
+2. Copy the Machine ID shown on the activation screen.
+3. Request a 90-day KerfCut beta key through the portal.
+4. Paste the license key into KerfCut and click **Activate**.
+5. Keep the key for reactivation on the same machine if needed.
+
+The license is machine-bound. If a tester changes computers, issue a new beta key from the portal.
+
+## User Data Folders
+
+KerfCut stores user data in:
+
+```text
+Documents/KerfSuite/KerfCut/
 ```
 
----
+Default subfolders:
 
-## Installation
+```text
+jobs/      Saved .kcut jobs
+exports/   Suggested default location for PDF and CSV exports
+logs/      Application logs
+```
+
+Users can still choose any folder when saving jobs, exporting PDFs, or exporting/importing CSV files.
+
+## Run From Source
 
 ```bash
-pip install PyQt6 reportlab
-```
-
-## Run
-
-```bash
+cd /d/Coding/Feed_Rate/KerfSuite/apps/kerfcut
+python -m venv .venv
+source .venv/Scripts/activate
+python -m pip install -r requirements.txt -r requirements-dev.txt
 python main.py
 ```
 
 ## Run Tests
 
 ```bash
-pip install pytest
-python -m pytest tests/ -v
+python -m pytest
 ```
 
----
+## Main Workflow
 
-## Workflow
-
-1. **Job Info** — set job name, customer, blade kerf, labour rate
-2. **Stock Sheets** — add sheet sizes and quantities available
-3. **Pieces** — enter all pieces needed (qty × width × height)
-4. **F5** — run optimisation
-5. **Cut Plan** — visual colour-coded layout per sheet
-6. **Costs** — material cost, labour estimate, customer quote price
-7. **Export PDF** — printable cut plan + cost summary
-
----
+1. Add job/customer/material details.
+2. Add stock sheets and quantities.
+3. Add pieces and rotation settings.
+4. Press **F5** or use **Optimise -> Run Optimisation**.
+5. Review the cut plan and costs.
+6. Export PDF or CSV if needed.
 
 ## File Formats
 
 | Extension | Description |
 |---|---|
-| `.kcut` | KerfCut job file (JSON) — primary save/load format |
-| `.zcad` | Legacy KerfCut file — still openable for backwards compatibility |
-| `.ZAD`  | Legacy Z-CAD 2.1d file — importable via File → Import |
+| `.kcut` | KerfCut job file (JSON) |
+| `.zcad` | Legacy KerfCut JSON file, still openable |
+| `.ZAD` | Legacy Z-CAD 2.1d file, importable via File -> Import |
+| `.csv` | Piece list import/export |
+| `.pdf` | Cut plan export |
 
----
+## Packaging
 
-## Algorithm
+KerfCut is packaged with PyInstaller and Inno Setup. Install Inno Setup separately and make sure `iscc` is available on your PATH, or run it from the Inno Setup install folder.
 
-KerfCut uses **MaxRects BSSF** (Best Short Side Fit), a well-studied 2D rectangle packing algorithm that achieves 85–95%+ efficiency on typical workshop jobs — a major improvement over the simple guillotine approach in the original Z-CAD.
+```bash
+python build.py
+iscc installer.iss
+```
 
-Pieces are sorted by area (largest first) before placement. Rotation is attempted for each piece unless grain-lock is enabled.
+The installer bundles `build/KerfCut`. It should not include local virtual environments, caches, `.env` files, logs, test artifacts, or user job files.

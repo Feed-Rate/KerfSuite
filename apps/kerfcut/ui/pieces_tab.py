@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QShortcut, QKeySequence
 from core.models import Piece
+from core.paths import EXPORTS_DIR
 from utils.logger import logger
 
 COLUMNS = ["Qty", "Width (mm)", "Height (mm)", "Label",
@@ -106,7 +107,7 @@ class PiecesTab(QWidget):
 
     def _import_csv(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Import CSV", "", "CSV files (*.csv);;All files (*)")
+            self, "Import CSV", str(EXPORTS_DIR), "CSV files (*.csv);;All files (*)")
         if not path:
             return
         try:

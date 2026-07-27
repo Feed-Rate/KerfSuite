@@ -11,6 +11,7 @@ from PyQt6.QtGui import QFont
 from version import APP_NAME, APP_AUTHOR
 from ui.main_window import MainWindow
 from utils.logger import logger
+from core.paths import ensure_user_dirs
 
 from PyQt6.QtCore import QSettings
 
@@ -56,6 +57,7 @@ def global_exception_handler(exc_type, exc_value, exc_traceback):
 def launch() -> int:
     # Install the global exception hook
     sys.excepthook = global_exception_handler
+    ensure_user_dirs()
     logger.info(f"Starting {APP_NAME}...")
 
     app = QApplication(sys.argv)

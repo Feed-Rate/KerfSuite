@@ -263,3 +263,21 @@ def test_guillotine_strategy():
     assert result.total_pieces_placed == 3
     assert len(result.unplaced) == 0
     assert abs(result.overall_efficiency - 100.0) < 1.0
+
+
+def test_guillotine_with_kerf():
+    from core.optimizer import GuillotineStrategy
+    # Sheet 1000x1000, kerf 10
+    # Piece 1: 500x1000 -> 510x1010 virtual (Width overflow allowed)
+    # Piece 2: 490x1000 -> 500x1010 virtual (Fits in remaining 490 width + 10 kerf)
+    job = make_job(
+        sheets=[Sheet(width=1000, height=1000, active=True, quantity=1)],
+        pieces=[
+            Piece(quantity=1, width=500, height=1000),
+            Piece(quantity=1, width=490, height=1000),
+        ],
+        kerf=10
+    )
+    result = optimize(job, strategy=GuillotineStrategy())
+    assert result.total_pieces_placed == 2
+    assert len(result.unplaced) == 0
