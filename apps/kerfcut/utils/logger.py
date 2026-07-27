@@ -1,10 +1,18 @@
 """
-KerfCut — Centralized Logging
+KerfCut centralized logging.
 Handles all application logging, including rotating file handlers.
 """
 import logging
+import os
 from logging.handlers import RotatingFileHandler
-from core.paths import LOGS_DIR
+from pathlib import Path
+
+LOGS_DIR = Path(
+    os.getenv(
+        "KERFCUT_DATA_DIR",
+        str(Path.home() / "Documents" / "KerfSuite" / "KerfCut"),
+    )
+) / "logs"
 
 # Setup logs directory
 try:
