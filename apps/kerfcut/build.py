@@ -19,6 +19,8 @@ def build():
         "--noconfirm",
         "--clean",
         "--windowed",
+        "--icon",
+        str((Path("assets") / "KerfCut.ico").resolve()),
         "--name",
         APP_NAME,
         "--distpath",
