@@ -31,7 +31,11 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+/dist/
 /coverage/
+
+# Local runtime configuration
+.env
 
 # Symbolication related
 app.*.symbols

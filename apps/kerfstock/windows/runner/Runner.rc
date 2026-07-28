@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.synontech" "\0"
-            VALUE "FileDescription", "kerfstock" "\0"
+            VALUE "CompanyName", "Feed Rate / SynonTech" "\0"
+            VALUE "FileDescription", "KerfStock Inventory System" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "kerfstock" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.synontech. All rights reserved." "\0"
             VALUE "OriginalFilename", "kerfstock.exe" "\0"
-            VALUE "ProductName", "kerfstock" "\0"
+            VALUE "ProductName", "KerfStock" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
