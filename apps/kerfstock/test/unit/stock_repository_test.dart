@@ -18,9 +18,21 @@ void main() {
         'width': 2440.0,
         'height': 1220.0,
         'asset_type': 'full_sheet',
+        'quantity': 1,
       });
     });
 
+    test('includes the requested batch quantity', () {
+      final payload = buildCreateAssetPayload(
+        materialId: 'material-1',
+        width: 2440,
+        height: 1220,
+        type: 'full_sheet',
+        quantity: 25,
+      );
+
+      expect(payload['quantity'], 25);
+    });
     test('omits absent optional fields instead of sending null', () {
       final payload = buildCreateAssetPayload(
         materialId: 'material-1',

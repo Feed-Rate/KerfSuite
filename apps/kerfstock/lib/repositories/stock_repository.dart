@@ -9,12 +9,14 @@ Map<String, dynamic> buildCreateAssetPayload({
   String? displayName,
   String? locationId,
   String? jobReference,
+  int quantity = 1,
 }) {
   final payload = <String, dynamic>{
     'material_id': materialId,
     'width': width,
     'height': height,
     'asset_type': type,
+    'quantity': quantity,
   };
 
   if (displayName != null) payload['display_name'] = displayName;
@@ -47,7 +49,7 @@ class StockRepository {
     return _apiService.getLocations();
   }
 
-  Future<Asset> createAsset({
+  Future<List<Asset>> createAssets({
     required String materialId,
     required double width,
     required double height,
@@ -55,6 +57,7 @@ class StockRepository {
     String? displayName,
     String? locationId,
     String? jobReference,
+    int quantity = 1,
   }) async {
     final data = buildCreateAssetPayload(
       materialId: materialId,
@@ -64,10 +67,33 @@ class StockRepository {
       displayName: displayName,
       locationId: locationId,
       jobReference: jobReference,
+      quantity: quantity,
     );
 
-    final rawAsset = await _apiService.createAsset(data);
-    return Asset.fromJson(rawAsset);
+    final rawAssets = await _apiService.createAssets(data);
+    return rawAssets.map(Asset.fromJson).toList();
+  }
+
+  Future<Asset> updateAsset({
+    required Asset asset,
+    required String materialId,
+    required double width,
+    required double height,
+    required String status,
+    String? displayName,
+    String? locationId,
+    String? jobReference,
+  }) async {
+    final raw = await _apiService.updateAsset(asset.id, {
+      'material_id': materialId,
+      'width': width,
+      'height': height,
+      'status': status,
+      'display_name': displayName,
+      'location_id': locationId,
+      'job_reference': jobReference,
+    });
+    return Asset.fromJson(raw);
   }
 
   Future<String> getCurrentRole() => _apiService.getCurrentRole();

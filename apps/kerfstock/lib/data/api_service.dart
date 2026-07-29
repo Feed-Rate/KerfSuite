@@ -115,7 +115,9 @@ class ApiService {
     );
   }
 
-  Future<Map<String, dynamic>> createAsset(Map<String, dynamic> data) async {
+  Future<List<Map<String, dynamic>>> createAssets(
+    Map<String, dynamic> data,
+  ) async {
     final response = await _awaitResponse(
       http.post(
         Uri.parse('$baseUrl/api/stock/assets'),
@@ -126,11 +128,38 @@ class ApiService {
     );
 
     if (response.statusCode == 200 || response.statusCode == 201) {
-      return json.decode(response.body);
+      final decoded = json.decode(response.body);
+      if (decoded is List) {
+        return decoded
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList();
+      }
+      return [Map<String, dynamic>.from(decoded as Map)];
     }
 
     throw ApiRequestException(
       'Creating asset failed',
+      statusCode: response.statusCode,
+    );
+  }
+
+  Future<Map<String, dynamic>> updateAsset(
+    String assetId,
+    Map<String, dynamic> data,
+  ) async {
+    final response = await _awaitResponse(
+      http.patch(
+        Uri.parse('$baseUrl/api/stock/assets/$assetId'),
+        headers: await _getHeaders(),
+        body: json.encode(data),
+      ),
+      'Updating asset',
+    );
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(json.decode(response.body));
+    }
+    throw ApiRequestException(
+      'Updating asset failed',
       statusCode: response.statusCode,
     );
   }

@@ -1,6 +1,8 @@
 class Asset {
   final String id;
   final String systemName;
+  final String materialId;
+  final String? locationId;
   final String? displayName;
   final double width;
   final double height;
@@ -14,6 +16,8 @@ class Asset {
   Asset({
     required this.id,
     required this.systemName,
+    required this.materialId,
+    this.locationId,
     this.displayName,
     required this.width,
     required this.height,
@@ -29,6 +33,8 @@ class Asset {
     return Asset(
       id: json['id'],
       systemName: json['system_name'],
+      materialId: json['material_id'] as String? ?? '',
+      locationId: json['location_id'] as String?,
       displayName: json['display_name'],
       width: (json['width'] as num).toDouble(),
       height: (json['height'] as num).toDouble(),

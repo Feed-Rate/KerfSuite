@@ -136,6 +136,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  Future<void> _openEditAssetDialog(Asset asset) async {
+    final success = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AddAssetDialog(asset: asset),
+    );
+    if (success == true && mounted) {
+      await context.read<InventoryProvider>().refresh();
+      _triggerSyncFlash();
+    }
+  }
+
   List<Asset> _getFilteredAssets(List<Asset> assets) {
     var list = assets;
     if (!_showArchive) {
@@ -528,6 +540,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     ),
                                   ),
                                 ),
+                                const DataColumn(
+                                  label: Text(
+                                    'ACTIONS',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
                               ],
                               rows: filteredList.map((asset) {
                                 final matName =
@@ -574,6 +594,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     DataCell(_buildStatusBadge(asset.status)),
                                     DataCell(Text(asset.locationName)),
                                     DataCell(Text(asset.jobReference ?? '-')),
+                                    DataCell(
+                                      IconButton(
+                                        tooltip: 'Edit sheet',
+                                        icon: const Icon(Icons.edit_outlined),
+                                        onPressed: () =>
+                                            _openEditAssetDialog(asset),
+                                      ),
+                                    ),
                                   ],
                                 );
                               }).toList(),

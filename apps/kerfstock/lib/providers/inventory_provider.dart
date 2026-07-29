@@ -69,9 +69,10 @@ class InventoryProvider with ChangeNotifier {
     String? displayName,
     String? locationId,
     String? jobReference,
+    int quantity = 1,
   }) async {
     try {
-      final newAsset = await _repository.createAsset(
+      final newAssets = await _repository.createAssets(
         materialId: materialId,
         width: width,
         height: height,
@@ -79,8 +80,40 @@ class InventoryProvider with ChangeNotifier {
         displayName: displayName,
         locationId: locationId,
         jobReference: jobReference,
+        quantity: quantity,
       );
-      _assets.insert(0, newAsset);
+      _assets.insertAll(0, newAssets);
+      notifyListeners();
+    } catch (e) {
+      _error = userFacingApiError(e);
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> editAsset({
+    required Asset asset,
+    required String materialId,
+    required double width,
+    required double height,
+    required String status,
+    String? displayName,
+    String? locationId,
+    String? jobReference,
+  }) async {
+    try {
+      final updated = await _repository.updateAsset(
+        asset: asset,
+        materialId: materialId,
+        width: width,
+        height: height,
+        status: status,
+        displayName: displayName,
+        locationId: locationId,
+        jobReference: jobReference,
+      );
+      final index = _assets.indexWhere((item) => item.id == updated.id);
+      if (index >= 0) _assets[index] = updated;
       notifyListeners();
     } catch (e) {
       _error = userFacingApiError(e);

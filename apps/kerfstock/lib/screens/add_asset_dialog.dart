@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../data/api_service.dart';
+import '../domain/models/asset.dart';
 import '../providers/inventory_provider.dart';
 import '../theme.dart';
 
 class AddAssetDialog extends StatefulWidget {
-  const AddAssetDialog({super.key});
+  final Asset? asset;
+
+  const AddAssetDialog({super.key, this.asset});
 
   @override
   State<AddAssetDialog> createState() => _AddAssetDialogState();
@@ -23,10 +26,12 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
   String? _selectedMaterialId;
   String? _selectedLocationId;
   String _selectedAssetType = 'full_sheet';
+  String _selectedStatus = 'available';
   bool _jobRefWasInherited = false;
 
   final _widthController = TextEditingController(text: '2440');
   final _heightController = TextEditingController(text: '1220');
+  final _quantityController = TextEditingController(text: '1');
   final _displayNameController = TextEditingController();
   final _jobRefController = TextEditingController();
 
@@ -40,6 +45,17 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
   @override
   void initState() {
     super.initState();
+    final asset = widget.asset;
+    if (asset != null) {
+      _selectedMaterialId = asset.materialId;
+      _selectedLocationId = asset.locationId;
+      _selectedAssetType = asset.type;
+      _selectedStatus = asset.status;
+      _widthController.text = '${asset.width}';
+      _heightController.text = '${asset.height}';
+      _displayNameController.text = asset.displayName ?? '';
+      _jobRefController.text = asset.jobReference ?? '';
+    }
     _loadDropdownData();
   }
 
@@ -91,26 +107,48 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
     try {
       final width = double.parse(_widthController.text.trim());
       final height = double.parse(_heightController.text.trim());
+      final quantity = int.parse(_quantityController.text.trim());
 
       final provider = context.read<InventoryProvider>();
-      await provider.addAsset(
-        materialId: _selectedMaterialId!,
-        width: width,
-        height: height,
-        type: _selectedAssetType,
-        displayName: _displayNameController.text.trim().isEmpty
-            ? null
-            : _displayNameController.text.trim(),
-        locationId: _selectedLocationId,
-        jobReference: _jobRefController.text.trim().isEmpty
-            ? null
-            : _jobRefController.text.trim(),
-      );
+      final displayName = _displayNameController.text.trim().isEmpty
+          ? null
+          : _displayNameController.text.trim();
+      final jobReference = _jobRefController.text.trim().isEmpty
+          ? null
+          : _jobRefController.text.trim();
+      final existing = widget.asset;
+      if (existing == null) {
+        await provider.addAsset(
+          materialId: _selectedMaterialId!,
+          width: width,
+          height: height,
+          type: _selectedAssetType,
+          displayName: displayName,
+          locationId: _selectedLocationId,
+          jobReference: jobReference,
+          quantity: quantity,
+        );
+      } else {
+        await provider.editAsset(
+          asset: existing,
+          materialId: _selectedMaterialId!,
+          width: width,
+          height: height,
+          status: _selectedStatus,
+          displayName: displayName,
+          locationId: _selectedLocationId,
+          jobReference: jobReference,
+        );
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Asset added successfully'),
+          SnackBar(
+            content: Text(
+              widget.asset == null
+                  ? 'Assets added successfully'
+                  : 'Asset updated successfully',
+            ),
             backgroundColor: Colors.green,
           ),
         );
@@ -190,7 +228,7 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'ADD NEW ASSET',
+                    widget.asset == null ? 'ADD NEW ASSET' : 'EDIT ',
                     style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                       fontSize: 18,
                       letterSpacing: 1.2,
@@ -296,6 +334,29 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
                     ),
                     const SizedBox(height: 16),
 
+                    if (widget.asset == null) ...[
+                      TextFormField(
+                        controller: _quantityController,
+                        decoration: const InputDecoration(
+                          labelText: 'Quantity of sheets *',
+                          helperText: 'Each sheet receives its own stock ID',
+                        ),
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        validator: (value) {
+                          final quantity = int.tryParse(value?.trim() ?? '');
+                          if (quantity == null ||
+                              quantity < 1 ||
+                              quantity > 500) {
+                            return 'Enter a quantity from 1 to 500';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     // Asset Type
                     DropdownButtonFormField<String>(
                       dropdownColor: KerfTheme.bgPanel,
@@ -309,14 +370,55 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
                           child: Text(t['label']!),
                         );
                       }).toList(),
-                      onChanged: (val) {
-                        if (val != null) {
-                          setState(() => _selectedAssetType = val);
-                        }
-                      },
+                      onChanged: widget.asset == null
+                          ? (val) {
+                              if (val != null) {
+                                setState(() => _selectedAssetType = val);
+                              }
+                            }
+                          : null,
                     ),
                     const SizedBox(height: 16),
 
+                    if (widget.asset != null) ...[
+                      DropdownButtonFormField<String>(
+                        dropdownColor: KerfTheme.bgPanel,
+                        decoration: const InputDecoration(labelText: 'Status'),
+                        initialValue: _selectedStatus,
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'available',
+                            child: Text('Available'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'reserved',
+                            child: Text('Reserved'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'consumed',
+                            child: Text('Consumed'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'disposed',
+                            child: Text('Disposed'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'damaged',
+                            child: Text('Damaged'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'missing',
+                            child: Text('Missing'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => _selectedStatus = value);
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     // Display Name
                     TextFormField(
                       controller: _displayNameController,
@@ -394,7 +496,11 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
                               width: 20,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Text('ADD ASSET'),
+                          : Text(
+                              widget.asset == null
+                                  ? 'ADD ASSETS'
+                                  : 'SAVE CHANGES',
+                            ),
                     ),
                   ],
                 ),
@@ -410,6 +516,7 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
   void dispose() {
     _widthController.dispose();
     _heightController.dispose();
+    _quantityController.dispose();
     _displayNameController.dispose();
     _jobRefController.dispose();
     super.dispose();
