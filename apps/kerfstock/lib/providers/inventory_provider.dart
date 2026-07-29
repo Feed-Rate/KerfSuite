@@ -96,6 +96,7 @@ class InventoryProvider with ChangeNotifier {
     required String materialId,
     required double width,
     required double height,
+    required int quantity,
     required String status,
     String? displayName,
     String? locationId,
@@ -107,6 +108,7 @@ class InventoryProvider with ChangeNotifier {
         materialId: materialId,
         width: width,
         height: height,
+        quantity: quantity,
         status: status,
         displayName: displayName,
         locationId: locationId,
@@ -114,6 +116,19 @@ class InventoryProvider with ChangeNotifier {
       );
       final index = _assets.indexWhere((item) => item.id == updated.id);
       if (index >= 0) _assets[index] = updated;
+      notifyListeners();
+    } catch (e) {
+      _error = userFacingApiError(e);
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> removeAsset(Asset asset) async {
+    try {
+      final archived = await _repository.archiveAsset(asset);
+      final index = _assets.indexWhere((item) => item.id == archived.id);
+      if (index >= 0) _assets[index] = archived;
       notifyListeners();
     } catch (e) {
       _error = userFacingApiError(e);

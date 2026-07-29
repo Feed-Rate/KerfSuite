@@ -79,6 +79,7 @@ class StockRepository {
     required String materialId,
     required double width,
     required double height,
+    required int quantity,
     required String status,
     String? displayName,
     String? locationId,
@@ -88,11 +89,17 @@ class StockRepository {
       'material_id': materialId,
       'width': width,
       'height': height,
+      'quantity': quantity,
       'status': status,
       'display_name': displayName,
       'location_id': locationId,
       'job_reference': jobReference,
     });
+    return Asset.fromJson(raw);
+  }
+
+  Future<Asset> archiveAsset(Asset asset) async {
+    final raw = await _apiService.archiveAsset(asset.id);
     return Asset.fromJson(raw);
   }
 

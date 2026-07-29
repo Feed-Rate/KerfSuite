@@ -53,6 +53,7 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
       _selectedStatus = asset.status;
       _widthController.text = '${asset.width}';
       _heightController.text = '${asset.height}';
+      _quantityController.text = '${asset.quantity}';
       _displayNameController.text = asset.displayName ?? '';
       _jobRefController.text = asset.jobReference ?? '';
     }
@@ -134,6 +135,7 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
           materialId: _selectedMaterialId!,
           width: width,
           height: height,
+          quantity: quantity,
           status: _selectedStatus,
           displayName: displayName,
           locationId: _selectedLocationId,
@@ -146,8 +148,8 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
           SnackBar(
             content: Text(
               widget.asset == null
-                  ? 'Assets added successfully'
-                  : 'Asset updated successfully',
+                  ? 'Inventory batch added successfully'
+                  : 'Inventory batch updated successfully',
             ),
             backgroundColor: Colors.green,
           ),
@@ -334,29 +336,25 @@ class _AddAssetDialogState extends State<AddAssetDialog> {
                     ),
                     const SizedBox(height: 16),
 
-                    if (widget.asset == null) ...[
-                      TextFormField(
-                        controller: _quantityController,
-                        decoration: const InputDecoration(
-                          labelText: 'Quantity of sheets *',
-                          helperText: 'Each sheet receives its own stock ID',
-                        ),
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                        ],
-                        validator: (value) {
-                          final quantity = int.tryParse(value?.trim() ?? '');
-                          if (quantity == null ||
-                              quantity < 1 ||
-                              quantity > 500) {
-                            return 'Enter a quantity from 1 to 500';
-                          }
-                          return null;
-                        },
+                    TextFormField(
+                      controller: _quantityController,
+                      decoration: const InputDecoration(
+                        labelText: 'Quantity of sheets *',
+                        helperText: 'One inventory line for this sheet batch',
                       ),
-                      const SizedBox(height: 16),
-                    ],
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      validator: (value) {
+                        final quantity = int.tryParse(value?.trim() ?? '');
+                        if (quantity == null ||
+                            quantity < 1 ||
+                            quantity > 100000) {
+                          return 'Enter a quantity from 1 to 100000';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
                     // Asset Type
                     DropdownButtonFormField<String>(
                       dropdownColor: KerfTheme.bgPanel,

@@ -148,6 +148,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  Future<void> _removeAsset(Asset asset) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('REMOVE SHEET?'),
+        content: Text(
+          'Remove ${asset.systemName} from active inventory?\n\n'
+          'The sheet will remain in Archived/Consumed Assets so its history '
+          'and stock ID are preserved.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('CANCEL'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('REMOVE'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await context.read<InventoryProvider>().removeAsset(asset);
+      if (!mounted) return;
+      _triggerSyncFlash();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${asset.systemName} removed from inventory')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Failed to remove sheet')));
+    }
+  }
+
   List<Asset> _getFilteredAssets(List<Asset> assets) {
     var list = assets;
     if (!_showArchive) {
@@ -510,6 +549,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 ),
                                 const DataColumn(
                                   label: Text(
+                                    'QUANTITY',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                const DataColumn(
+                                  label: Text(
                                     'TYPE',
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
@@ -588,6 +635,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         ),
                                       ),
                                     ),
+                                    DataCell(Text('${asset.quantity}')),
                                     DataCell(
                                       Text(_formatAssetType(asset.type)),
                                     ),
@@ -595,11 +643,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     DataCell(Text(asset.locationName)),
                                     DataCell(Text(asset.jobReference ?? '-')),
                                     DataCell(
-                                      IconButton(
-                                        tooltip: 'Edit sheet',
-                                        icon: const Icon(Icons.edit_outlined),
-                                        onPressed: () =>
-                                            _openEditAssetDialog(asset),
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            tooltip: 'Edit sheet',
+                                            icon: const Icon(
+                                              Icons.edit_outlined,
+                                            ),
+                                            onPressed: () =>
+                                                _openEditAssetDialog(asset),
+                                          ),
+                                          if (asset.status != 'disposed' &&
+                                              asset.status != 'consumed')
+                                            IconButton(
+                                              tooltip: 'Remove sheet',
+                                              color: KerfTheme.statusError,
+                                              icon: const Icon(
+                                                Icons.delete_outline,
+                                              ),
+                                              onPressed: () =>
+                                                  _removeAsset(asset),
+                                            ),
+                                        ],
                                       ),
                                     ),
                                   ],

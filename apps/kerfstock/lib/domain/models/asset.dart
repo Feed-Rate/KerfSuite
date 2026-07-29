@@ -6,6 +6,7 @@ class Asset {
   final String? displayName;
   final double width;
   final double height;
+  final int quantity;
   final String type;
   final String status;
   final String materialName;
@@ -21,6 +22,7 @@ class Asset {
     this.displayName,
     required this.width,
     required this.height,
+    required this.quantity,
     required this.type,
     required this.status,
     required this.materialName,
@@ -38,6 +40,7 @@ class Asset {
       displayName: json['display_name'],
       width: (json['width'] as num).toDouble(),
       height: (json['height'] as num).toDouble(),
+      quantity: (json['quantity'] as num?)?.toInt() ?? 1,
       type: json['asset_type'],
       status: json['status'],
       materialName: json['materials']?['name'] ?? 'Unknown',

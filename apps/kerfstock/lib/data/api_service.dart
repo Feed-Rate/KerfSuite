@@ -164,6 +164,23 @@ class ApiService {
     );
   }
 
+  Future<Map<String, dynamic>> archiveAsset(String assetId) async {
+    final response = await _awaitResponse(
+      http.delete(
+        Uri.parse('$baseUrl/api/stock/assets/$assetId'),
+        headers: await _getHeaders(),
+      ),
+      'Removing asset',
+    );
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(json.decode(response.body));
+    }
+    throw ApiRequestException(
+      'Removing asset failed',
+      statusCode: response.statusCode,
+    );
+  }
+
   Future<List<Map<String, dynamic>>> getMaterials() async {
     final response = await _awaitResponse(
       http.get(

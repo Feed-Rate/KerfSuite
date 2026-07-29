@@ -1,5 +1,5 @@
 #define MyAppName "KerfStock"
-#define MyAppVersion "1.0.1-beta.2"
+#define MyAppVersion "1.0.1-beta.3"
 #define MyAppPublisher "Feed Rate / SynonTech"
 #define MyAppExeName "kerfstock.exe"
 

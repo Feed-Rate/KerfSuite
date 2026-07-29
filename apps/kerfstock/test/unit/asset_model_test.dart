@@ -10,6 +10,7 @@ void main() {
         'display_name': 'Kitchen Panel',
         'width': 2440,
         'height': 1220,
+        'quantity': 100,
         'asset_type': 'full_sheet',
         'status': 'available',
         'materials': {'name': 'MDF', 'thickness': 16.5},
@@ -24,6 +25,7 @@ void main() {
       expect(asset.displayName, 'Kitchen Panel');
       expect(asset.width, 2440.0);
       expect(asset.height, 1220.0);
+      expect(asset.quantity, 100);
       expect(asset.type, 'full_sheet');
       expect(asset.materialName, 'MDF');
       expect(asset.materialThickness, 16.5);
@@ -51,6 +53,7 @@ void main() {
       expect(asset.materialName, 'Unknown');
       expect(asset.locationName, 'None');
       expect(asset.jobReference, isNull);
+      expect(asset.quantity, 1);
     });
   });
 }
